@@ -1,0 +1,90 @@
+---
+- name: Configure UTC Timezone
+  file:
+    src: /usr/share/zoneinfo/UTC
+    dest: /etc/localtime
+    owner: root
+    group: root
+    state: link
+  register: timezone
+- name: DNF - Update configuration
+  lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '{{ item.regexp }}'
+    line:  '{{ item.line }}'
+    backup: yes
+  with_items:
+    - { regexp: '^installonly_limit=', line: 'installonly_limit=2' }
+    - { regexp: '^max_parallel_downloads=', line: 'max_parallel_downloads=10' }
+    - { regexp: '^fastestmirror=', line: 'fastestmirror=True' }
+- name: Update the OS
+  package:
+    name: '*'
+    state: latest
+  register: updated
+- name: Reboot the OS
+  reboot:
+  when: updated.changed or timezone.changed
+- name: Update swappinness value
+  sysctl:
+    name: vm.swappiness
+    value: '10'
+    state: present
+- name: Install epel-release
+  package:
+    name: epel-release
+    state: present
+- name: Install base set of packages
+  package:
+    name:
+      - wget
+      - zip
+      - screen
+      - tcpdump
+      - system-storage-manager
+      - virt-what
+      - unzip
+      - firewalld
+      - htop
+    state: present
+- name: Enable and start firewalld
+  service:
+    name: firewalld
+    enabled: yes
+    state: started
+- name: Check for virtualization
+  command:
+    cmd: virt-what
+  register: virtualization
+  changed_when: False
+- name: Install QEMU Guest Agent
+  package:
+    name:
+      - qemu-guest-agent
+    state: present
+  when: virtualization.stdout=='kvm'
+- name: Enable QEMU Guest Agent
+  service:
+    name: qemu-guest-agent
+    enabled: yes
+    state: started
+  when: virtualization.stdout=='kvm'
+- name: Configure Chronyd server
+  lineinfile:
+    path: /etc/chrony.conf
+    regexp: '{{ item.regexp }}'
+    line: '{{ item.line }}'
+    backup: yes
+  with_items:
+    - { regexp: '^initstepslew ', line: 'initstepslew 0.5 pool.ntp.org' }
+    - { regexp: '^makestep ', line: 'makestep 0.5 -1' }
+  register: chronyconfigupdated
+- name: Enable chronyd
+  service:
+    name: chronyd
+    enabled: yes
+- name: Restart chronyd
+  service:
+    name: chronyd
+    state: restarted
+  when: chronyconfigupdated.changed
