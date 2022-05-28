@@ -12,7 +12,6 @@
     path: /etc/dnf/dnf.conf
     regexp: '{{ item.regexp }}'
     line:  '{{ item.line }}'
-    backup: yes
   with_items:
     - { regexp: '^installonly_limit=', line: 'installonly_limit=2' }
     - { regexp: '^max_parallel_downloads=', line: 'max_parallel_downloads=10' }
@@ -25,11 +24,35 @@
 - name: Reboot the OS
   reboot:
   when: updated.changed or timezone.changed
-- name: Update swappinness value
+- name: Update SSHd Configuration
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '{{ item.regexp }}'
+    line:  '{{ item.line }}'
+    validate: 'sshd -f %s -t'
+  with_items:
+    - { regexp: '^PermitRootLogin ', line: 'PermitRootLogin no' }
+    - { regexp: '^AllowTcpForwarding ', line: 'AllowTcpForwarding no' }
+    - { regexp: '^UseDNS ', line: 'UseDNS no' }
+    - { regexp: '^LoginGraceTime ', line: 'LoginGraceTime 1m' }
+    - { regexp: '^MaxAuthTries ', line: 'MaxAuthTries 3' }
+    - { regexp: '^MaxSessions ', line: 'MaxSessions: 3' }
+    - { regexp: '^Ciphers ', line: 'Ciphers aes128-ctr,aes192-ctr,aes256-ctr,aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc' }
+  register: sshdupdated
+- name: Restart SSHd
+  service:
+    name: sshd
+    state: restarted
+  when: sshdupdated.changed
+- name: Update sysctl values
   sysctl:
-    name: vm.swappiness
-    value: '10'
+    name: '{{ item.name }}'
+    value: '{{ item.value }}'
     state: present
+  with_items:
+    - { name: 'vm.swappiness', value: '10' }
+    - { name: 'net.ipv6.conf.all.disable_ipv6', value: '1' }
+    - { name: 'net.ipv6.conf.default.disable_ipv6', value: '1' }
 - name: Install epel-release
   package:
     name: epel-release
@@ -74,7 +97,6 @@
     path: /etc/chrony.conf
     regexp: '{{ item.regexp }}'
     line: '{{ item.line }}'
-    backup: yes
   with_items:
     - { regexp: '^initstepslew ', line: 'initstepslew 0.5 pool.ntp.org' }
     - { regexp: '^makestep ', line: 'makestep 0.5 -1' }
